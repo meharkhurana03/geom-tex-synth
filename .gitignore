@@ -9,3 +9,11 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 _deps
+
+# Project #
+build/
+geom-tex-synth
+imgui.ini
+
+# MacOS #
+*.DS_Store
