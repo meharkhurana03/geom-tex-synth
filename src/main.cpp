@@ -14,6 +14,7 @@ using namespace std;
 
 int screen_width = 800, screen_height = 450;
 vector<int> voxel_grid;
+vector<int> distance_field;
 
 GLint vModel_uniform, vView_uniform, vProjection_uniform;
 GLint lpos_world_uniform, eye_normal_uniform;
@@ -27,6 +28,7 @@ void rasterizer();
 void createMeshObject(unsigned int &, unsigned int &);
 void createQuadMeshObjectWithoutNormals(unsigned int &, unsigned int &);
 void createVoxelizedMeshObject(unsigned int &, unsigned int &, int);
+void createVoxelizedQuadMeshObject(unsigned int &program, unsigned int &shape_VAO, int grid_size);
 
 void setupModelTransformation(unsigned int &);
 void setupViewTransformation(unsigned int &);
@@ -71,8 +73,8 @@ void vert_stats(const vector<glm::vec3>& vertices) {
         }
     }
 
-    cout << "min: " << min_x << " " << min_y << " " << min_z << endl;
-    cout << "max: " << max_x << " " << max_y << " " << max_z << endl;
+    // cout << "min: " << min_x << " " << min_y << " " << min_z << endl;
+    // cout << "max: " << max_x << " " << max_y << " " << max_z << endl;
 
     exit(0);
 }
@@ -112,7 +114,7 @@ void normalize_vertices(vector<glm::vec3>& vertices) {
 
     // normalize
     for (glm::vec3& v : vertices) {
-        cout << v.x << " " << v.y << " " << v.z << endl;
+        // cout << v.x << " " << v.y << " " << v.z << endl;
         v.x = (v.x - min_x) / (max_x - min_x);
         v.y = (v.y - min_y) / (max_y - min_y);
         v.z = (v.z - min_z) / (max_z - min_z);
@@ -143,70 +145,127 @@ void voxelization(const vector<glm::vec3>& vertices, int gridSize) {
     // }
 
     for (const glm::vec3& v : vertices) {
-        int x = (v.x) * gridSize/3;
-        int y = (v.y) * gridSize/3;
-        int z = (v.z) * gridSize/3;
+        int x = (v.x) * gridSize;
+        int y = (v.y) * gridSize;
+        int z = (v.z) * gridSize;
 
         if (v.z > 0.5) {
-            cout << v.z << " " << x << " " << y << " " << z << endl;
+            // cout << v.z << " " << x << " " << y << " " << z << endl;
         }
-        cout << gridSize * gridSize * gridSize << " " << x + y * gridSize + z * gridSize * gridSize << endl;
+        // cout << gridSize * gridSize * gridSize << " " << x + y * gridSize + z * gridSize * gridSize << endl;
         voxel_grid[x + y * gridSize + z * gridSize * gridSize] = 1;
     }
 
-    // for (int i = 0; i < gridSize; i++) {
-    //     for (int j = 0; j < gridSize; j++){
-    //         for (int k = 0; k < gridSize; k++) {
-    //             cout << voxel_grid[i + j * gridSize + k * gridSize * gridSize] << " ";
-    //         }
-    //         cout << endl;
-    //     }
-    //     cout << endl;
-    // }
+    for (int k = 0; k < gridSize; k++) {
+        for (int j = 0; j < gridSize; j++){
+            for (int i = 0; i < gridSize; i++) {
+                cout << voxel_grid[k * gridSize * gridSize + j * gridSize + i] << " ";
+            }
+            cout << endl;
+        }
+        cout << endl;
+    }
 }
 
-void get_cube_vertex_array(int i, int j, int k, vert* vertices) {
-    vertices[0].pos = glm::vec3(i,   j,   k  );
-    vertices[1].pos = glm::vec3(i+1, j,   k  );
-    vertices[2].pos = glm::vec3(i+1, j+1, k  );
-    vertices[3].pos = glm::vec3(i+1, j+1, k  );
-    vertices[4].pos = glm::vec3(i,   j  , k  );
-    vertices[5].pos = glm::vec3(i,   j+1, k  );
+void create_distance_field(int gridSize) {
+    cout << "creating (squared) distance field" << endl;
+    distance_field.resize(gridSize * gridSize * gridSize);
+    for (int i = 0; i < gridSize * gridSize * gridSize; i++) {
+        distance_field[i] = 0;
+    }
 
-    vertices[6].pos = glm::vec3(i,   j,   k+1);
-    vertices[7].pos = glm::vec3(i+1, j,   k+1);
-    vertices[8].pos = glm::vec3(i+1, j+1, k+1);
-    vertices[9].pos = glm::vec3(i+1, j+1, k+1);
-    vertices[10].pos = glm::vec3(i,   j  , k+1);
-    vertices[11].pos = glm::vec3(i,   j+1, k+1);
+    for (int k = 0; k < gridSize; k++) {
+        
+        for (int j = 0; j < gridSize; j++){
+            
+            for (int i = 0; i < gridSize; i++) {
+                
+                if (voxel_grid[k * gridSize * gridSize + j * gridSize + i] == 1) {
+                    distance_field[k * gridSize * gridSize + j * gridSize + i] = 0;
+                }
+                else {
+                    int min_dist = gridSize * gridSize * gridSize;
+                    for (int k2 = 0; k2 < gridSize; k2++) {
+                        for (int j2 = 0; j2 < gridSize; j2++){
+                            for (int i2 = 0; i2 < gridSize; i2++) {
+                                if (voxel_grid[k2 * gridSize * gridSize + j2 * gridSize + i2] == 1) {
+                                    int dist = (k - k2) * (k - k2) + (j - j2) * (j - j2) + (i - i2) * (i - i2);
+                                    if (dist < min_dist) {
+                                        min_dist = dist;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    distance_field[k * gridSize * gridSize + j * gridSize + i] = min_dist;
+                }
 
-    vertices[12].pos = glm::vec3(i,   j,   k  );
-    vertices[13].pos = glm::vec3(i+1, j,   k  );
-    vertices[14].pos = glm::vec3(i+1, j,   k+1);
-    vertices[15].pos = glm::vec3(i+1, j,   k+1);
-    vertices[16].pos = glm::vec3(i,   j,   k  );
-    vertices[17].pos = glm::vec3(i,   j,   k+1);
+            }
+            cout << "k = " << k << " j = " << j << endl;
+        }
+    }
 
-    vertices[18].pos = glm::vec3(i,   j+1, k  );
-    vertices[19].pos = glm::vec3(i+1, j+1, k  );
-    vertices[20].pos = glm::vec3(i+1, j+1, k+1);
-    vertices[21].pos = glm::vec3(i+1, j+1, k+1);
-    vertices[22].pos = glm::vec3(i,   j+1, k  );
-    vertices[23].pos = glm::vec3(i,   j+1, k+1);
+    for (int k = 0; k < gridSize; k++) {
+        for (int j = 0; j < gridSize; j++){
+            for (int i = 0; i < gridSize; i++) {
+                if (distance_field[k * gridSize * gridSize + j * gridSize + i] < 10) {
+                    cout << "  " << distance_field[k * gridSize * gridSize + j * gridSize + i] << " ";
+                }
+                else if (distance_field[k * gridSize * gridSize + j * gridSize + i] < 100) {
+                    cout << " " << distance_field[k * gridSize * gridSize + j * gridSize + i] << " ";
+                }
+                else {
+                    cout << distance_field[k * gridSize * gridSize + j * gridSize + i] << " ";
+                }
+            }
+            cout << endl;
+        }
+        cout << endl;
+    }
+}
 
-    vertices[24].pos = glm::vec3(i,   j,   k  );
-    vertices[25].pos = glm::vec3(i,   j+1, k  );
-    vertices[26].pos = glm::vec3(i,   j+1, k+1);
-    vertices[27].pos = glm::vec3(i,   j+1, k+1);
-    vertices[28].pos = glm::vec3(i,   j,   k  );
-    vertices[29].pos = glm::vec3(i,   j,   k+1);
+void get_cube_vertex_array(int i, int j, int k, vert* vertices, int gridSize) {
+    vertices[ 0].pos = glm::vec3(i,   j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 1].pos = glm::vec3(i+1, j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 2].pos = glm::vec3(i+1, j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 3].pos = glm::vec3(i+1, j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 4].pos = glm::vec3(i,   j  , k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 5].pos = glm::vec3(i,   j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
 
-    vertices[30].pos = glm::vec3(i+1, j,   k  );
-    vertices[31].pos = glm::vec3(i+1, j+1, k  );
-    vertices[32].pos = glm::vec3(i+1, j+1, k+1);
-    vertices[33].pos = glm::vec3(i+1, j+1, k+1);
-    vertices[34].pos = glm::vec3(i+1, j,   k  );
-    vertices[35].pos = glm::vec3(i+1, j,   k+1);
+    vertices[ 6].pos = glm::vec3(i,   j,   k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 7].pos = glm::vec3(i+1, j,   k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 8].pos = glm::vec3(i+1, j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[ 9].pos = glm::vec3(i+1, j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[10].pos = glm::vec3(i,   j  , k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[11].pos = glm::vec3(i,   j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+
+    vertices[12].pos = glm::vec3(i,   j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[13].pos = glm::vec3(i+1, j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[14].pos = glm::vec3(i+1, j,   k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[15].pos = glm::vec3(i+1, j,   k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[16].pos = glm::vec3(i,   j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[17].pos = glm::vec3(i,   j,   k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+
+    vertices[18].pos = glm::vec3(i,   j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[19].pos = glm::vec3(i+1, j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[20].pos = glm::vec3(i+1, j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[21].pos = glm::vec3(i+1, j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[22].pos = glm::vec3(i,   j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[23].pos = glm::vec3(i,   j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+
+    vertices[24].pos = glm::vec3(i,   j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[25].pos = glm::vec3(i,   j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[26].pos = glm::vec3(i,   j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[27].pos = glm::vec3(i,   j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[28].pos = glm::vec3(i,   j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[29].pos = glm::vec3(i,   j,   k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+
+    vertices[30].pos = glm::vec3(i+1, j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[31].pos = glm::vec3(i+1, j+1, k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[32].pos = glm::vec3(i+1, j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[33].pos = glm::vec3(i+1, j+1, k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[34].pos = glm::vec3(i+1, j,   k  ) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
+    vertices[35].pos = glm::vec3(i+1, j,   k+1) - glm::vec3(0.5*gridSize, 0.5*gridSize, 0.5*gridSize);
 
     for (int i = 0; i < 36; i+=3) {
         glm::vec3 v1 = glm::vec3(vertices[(i + 1)].pos.x - vertices[i].pos.x, vertices[(i + 1)].pos.y - vertices[i].pos.y, vertices[(i + 1)].pos.z - vertices[i].pos.z);
@@ -236,14 +295,14 @@ void get_cube_vertex_array(int i, int j, int k, vert* vertices) {
 
 vector<vert> create_vertices_from_voxel_grid(int gridSize) {
     vector<vert> vertices;
-    for (int i = 0; i < gridSize; i++) {
+    for (int k = 0; k < gridSize; k++) {
         for (int j = 0; j < gridSize; j++){
-            for (int k = 0; k < gridSize; k++) {
+            for (int i = 0; i < gridSize; i++) {
                 // cout << gridSize * gridSize * gridSize << " " << i * gridSize * gridSize + j * gridSize + k << " ";
-                if (voxel_grid[i * gridSize * gridSize + j * gridSize + k] == 1) {
+                if (voxel_grid[k * gridSize * gridSize + j * gridSize + i] == 1) {
                     // cout << " " << "<--------";
                     vert cube_v[36];
-                    get_cube_vertex_array(i, j, k, cube_v);
+                    get_cube_vertex_array(i, j, k, cube_v, gridSize);
                     for (int idx = 0; idx < 36; idx++) {
                         vertices.push_back(cube_v[idx]);
                     }
@@ -258,7 +317,7 @@ vector<vert> create_vertices_from_voxel_grid(int gridSize) {
 
 int main()
 {
-    int grid_size = 60;
+    int grid_size = 50;
     initiate_voxel_grid(grid_size);
 
     // Setup window
@@ -383,7 +442,7 @@ int main()
         glBindVertexArray(VAO);
 
         glUniform3f(lpos_world_uniform, -50.0, 500.0, 30.0);
-        glUniform3f(eye_normal_uniform, -40.0, 40.0, -40.0);
+        glUniform3f(eye_normal_uniform, -0.0, 0.0, -40.0);
         glUniform3f(vColor_uniform, 0.1, 0.8, 0.85);
 
         glDrawArrays(GL_TRIANGLES, 0, nVertices);
@@ -594,10 +653,10 @@ void createQuadMeshObjectWithoutNormals(unsigned int &program, unsigned int &sha
         glm::vec3 c = glm::vec3(shape_vertices[(i + 2) * 3], shape_vertices[(i + 2) * 3 + 1], shape_vertices[(i + 2) * 3 + 2]);
         glm::vec3 n = glm::vec3(vertex_normals[i * 3], vertex_normals[i * 3 + 1], vertex_normals[i * 3 + 2]);
 
-        std::cout << a.x << " " << a.y << " " << a.z << std::endl;
-        std::cout << b.x << " " << b.y << " " << b.z << std::endl;
-        std::cout << c.x << " " << c.y << " " << c.z << std::endl;
-        std::cout << n.x << " " << n.y << " " << n.z << std::endl << std::endl;
+        // std::cout << a.x << " " << a.y << " " << a.z << std::endl;
+        // std::cout << b.x << " " << b.y << " " << b.z << std::endl;
+        // std::cout << c.x << " " << c.y << " " << c.z << std::endl;
+        // std::cout << n.x << " " << n.y << " " << n.z << std::endl << std::endl;
     }
 
     // Generate VAO object
@@ -636,11 +695,11 @@ void createMeshObject(unsigned int &program, unsigned int &shape_VAO)
     vector<glm::vec3> temp_normals;
     int ct = 0;
 
-    // scale = 20; // Change Scale of the model as needed
-    scale = 0.05;
+    scale = 30; // Change Scale of the model as needed
+    // scale = 0.05;
     // smpl.obj takes ~ 30 as scale, buddha and bunny take ~ 0.05 as scale
-    // FILE *file = fopen("src/smpl.obj", "r");
-    FILE *file = fopen("src/bunny.obj", "r");
+    FILE *file = fopen("src/smpl.obj", "r");
+    // FILE *file = fopen("src/bunny.obj", "r");
     // FILE * file = fopen("../Cobblestones3/Files/untitled.obj", "r");
     if (file == NULL)
         printf("File not found\n");
@@ -757,10 +816,10 @@ void createMeshObject(unsigned int &program, unsigned int &shape_VAO)
         glm::vec3 c = glm::vec3(shape_vertices[(i + 2) * 3], shape_vertices[(i + 2) * 3 + 1], shape_vertices[(i + 2) * 3 + 2]);
         glm::vec3 n = glm::vec3(vertex_normals[i * 3], vertex_normals[i * 3 + 1], vertex_normals[i * 3 + 2]);
 
-        std::cout << a.x << " " << a.y << " " << a.z << std::endl;
-        std::cout << b.x << " " << b.y << " " << b.z << std::endl;
-        std::cout << c.x << " " << c.y << " " << c.z << std::endl;
-        std::cout << n.x << " " << n.y << " " << n.z << std::endl << std::endl;
+        // std::cout << a.x << " " << a.y << " " << a.z << std::endl;
+        // std::cout << b.x << " " << b.y << " " << b.z << std::endl;
+        // std::cout << c.x << " " << c.y << " " << c.z << std::endl;
+        // std::cout << n.x << " " << n.y << " " << n.z << std::endl << std::endl;
     }
 
 
@@ -798,7 +857,7 @@ void createVoxelizedMeshObject(unsigned int &program, unsigned int &shape_VAO, i
     vector<glm::vec3> temp_normals;
     int ct = 0;
 
-    // scale = 20; // Change Scale of the model as needed
+    // scale = 30; // Change Scale of the model as needed
     scale = 0.05;
     // smpl.obj takes ~ 30 as scale, buddha and bunny take ~ 0.05 as scale
     // FILE *file = fopen("src/smpl.obj", "r");
@@ -871,7 +930,74 @@ void createVoxelizedMeshObject(unsigned int &program, unsigned int &shape_VAO, i
     normalize_vertices(temp_vertices);
     // vert_stats(temp_vertices);
     voxelization(temp_vertices, grid_size);
+    // create_distance_field(grid_size);
     vector<vert> vertices = create_vertices_from_voxel_grid(grid_size);
+    
+
+    // for (int i=0; i<grid_size; i++) {
+    //     for (int j=0; j<grid_size; j++) {
+    //         for (int k=0; k<grid_size; k++) {
+    //             if (voxel_grid[i * grid_size * grid_size + j * grid_size + k] == 1) {
+    //                 for (int idx=0; idx<vertices.size(); idx++) {
+    //                     if (vertices[idx].pos.x == i && vertices[idx].pos.y == j && vertices[idx].pos.z == k) {
+    //                         cout << vertices[idx].pos.x << " " << vertices[idx].pos.y << " " << vertices[idx].pos.z << endl;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
+    // float min_x = 1000000, min_y = 1000000, min_z = 1000000;
+    // for (int i=0; i<vertices.size(); i++) {
+    //     if (vertices[i].pos.x < min_x) {
+    //         min_x = vertices[i].pos.x;
+    //     }
+    //     if (vertices[i].pos.y < min_y) {
+    //         min_y = vertices[i].pos.y;
+    //     }
+    //     if (vertices[i].pos.z < min_z) {
+    //         min_z = vertices[i].pos.z;
+    //     }
+    // }
+    // cout << "min_x: " << min_x << endl;
+    // cout << "min_y: " << min_y << endl;
+    // cout << "min_z: " << min_z << endl;
+
+    // float max_x = -1000000, max_y = -1000000, max_z = -1000000;
+    // for (int i=0; i<vertices.size(); i++) {
+    //     if (vertices[i].pos.x > max_x) {
+    //         max_x = vertices[i].pos.x;
+    //     }
+    //     if (vertices[i].pos.y > max_y) {
+    //         max_y = vertices[i].pos.y;
+    //     }
+    //     if (vertices[i].pos.z > max_z) {
+    //         max_z = vertices[i].pos.z;
+    //     }
+    // }
+
+    // cout << "max_x: " << max_x << endl;
+    // cout << "max_y: " << max_y << endl;
+    // cout << "max_z: " << max_z << endl;
+
+    // int voxel_count = 0;
+    // for (int i=0; i<grid_size; i++) {
+    //     for (int j=0; j<grid_size; j++) {
+    //         for (int k=0; k<grid_size; k++) {
+    //             if (voxel_grid[i * grid_size * grid_size + j * grid_size + k] == 1) {
+    //                 voxel_count++;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // cout << "voxel_count: " << voxel_count << endl;
+
+    // cout << vertices.size()/36 << endl;
+
+
+    // exit(0);
 
     // Bind shader variables
     int vVertex_attrib = glGetAttribLocation(program, "vVertex");
@@ -930,7 +1056,7 @@ void createVoxelizedMeshObject(unsigned int &program, unsigned int &shape_VAO, i
     GLuint vertex_VBO; // Vertex Buffer
     glGenBuffers(1, &vertex_VBO);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * vertex_indices.size() * 3, shape_vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * vertices.size() * 3, shape_vertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(vVertex_attrib);
     glVertexAttribPointer(vVertex_attrib, 3, GL_FLOAT, GL_FALSE, 00, 0);
     delete[] shape_vertices;
@@ -938,7 +1064,7 @@ void createVoxelizedMeshObject(unsigned int &program, unsigned int &shape_VAO, i
     GLuint normal_VBO; // Normal Buffer
     glGenBuffers(1, &normal_VBO);
     glBindBuffer(GL_ARRAY_BUFFER, normal_VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * vertex_indices.size() * 3, vertex_normals, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * vertices.size() * 3, vertex_normals, GL_STATIC_DRAW);
     glEnableVertexAttribArray(vNormal_attrib);
     glVertexAttribPointer(vNormal_attrib, 3, GL_FLOAT, GL_FALSE, 0, 0);
     delete[] vertex_normals;
@@ -947,3 +1073,192 @@ void createVoxelizedMeshObject(unsigned int &program, unsigned int &shape_VAO, i
     glBindVertexArray(0);
 }
 
+
+
+
+
+
+void createVoxelizedQuadMeshObject(unsigned int &program, unsigned int &shape_VAO, int grid_size)
+{
+    vector<int> vertex_indices, uv_indices;
+    vector<glm::vec3> temp_vertices;
+    vector<glm::vec2> temp_uvs;
+    vector<glm::vec3> temp_normals;
+    int ct = 0;
+
+    scale = 4; // Change Scale of the model as needed
+    // smpl.obj takes ~ 30 as scale, buddha and bunny take ~ 0.05 as scale
+    // FILE * file = fopen("src/smpl.obj", "r");
+    FILE *file = fopen("src/Cobblestones3.obj", "r");
+    if (file == NULL)
+        printf("File not found\n");
+
+    while (true)
+    {
+
+        char head[128];
+        // read the first word of the line
+        int res = fscanf(file, "%s", head);
+        if (res == EOF)
+            break; // EOF = End Of File. Quit the loop.
+
+        if (strcmp(head, "v") == 0)
+        {
+            glm::vec3 vertex;
+            fscanf(file, "%f %f %f\n", &vertex.x, &vertex.y, &vertex.z);
+            // printf("%f %f %f\n", vertex.x, vertex.y, vertex.z );
+            temp_vertices.push_back(vertex);
+            ct++;
+        }
+
+        else if (strcmp(head, "vt") == 0)
+        {
+            glm::vec2 uv;
+            fscanf(file, "%f %f\n", &uv.x, &uv.y);
+            // printf("%f %f\n", uv.x, uv.y );
+            temp_uvs.push_back(uv);
+        }
+
+        else if (strcmp(head, "vn") == 0)
+        {
+            glm::vec3 normal;
+            fscanf(file, "%f %f %f\n", &normal.x, &normal.y, &normal.z);
+            // printf("%f %f %f\n", normal.x, normal.y, normal.z );
+            temp_normals.push_back(normal);
+        }
+
+        else if (strcmp(head, "f") == 0)
+        {
+            string vertex1, vertex2, vertex3;
+            int vertexIndex[4], uvIndex[4];
+            int matches = fscanf(file, "%d/%d %d/%d %d/%d %d/%d\n", &vertexIndex[0], &uvIndex[0], &vertexIndex[1], &uvIndex[1], &vertexIndex[2], &uvIndex[2], &vertexIndex[3], &uvIndex[3]);
+            if (matches != 8)
+            {
+                printf("OBJ File may not contain texture coordinates\n");
+            }
+            vertex_indices.push_back(vertexIndex[0]);
+            vertex_indices.push_back(vertexIndex[1]);
+            vertex_indices.push_back(vertexIndex[2]);
+            vertex_indices.push_back(vertexIndex[0]);
+            vertex_indices.push_back(vertexIndex[2]);
+            vertex_indices.push_back(vertexIndex[3]);
+            uv_indices.push_back(uvIndex[0]);
+            uv_indices.push_back(uvIndex[1]);
+            uv_indices.push_back(uvIndex[2]);
+            uv_indices.push_back(uvIndex[0]);
+            uv_indices.push_back(uvIndex[2]);
+            uv_indices.push_back(uvIndex[3]);
+        }
+    }
+    fclose(file);
+
+    glUseProgram(program);
+
+    normalize_vertices(temp_vertices);
+    // vert_stats(temp_vertices);
+    voxelization(temp_vertices, grid_size);
+    // create_distance_field(grid_size);
+    vector<vert> vertices = create_vertices_from_voxel_grid(grid_size);
+
+    // Bind shader variables
+    int vVertex_attrib = glGetAttribLocation(program, "vVertex");
+    if (vVertex_attrib == -1)
+    {
+        fprintf(stderr, "Could not bind location: vVertex\n");
+        exit(0);
+    }
+
+    int vNormal_attrib = glGetAttribLocation(program, "vNormal");
+    if (vNormal_attrib == -1)
+    {
+        std::cout << "Could not bind location: vNormal\n";
+    }
+
+    GLfloat *shape_vertices = new GLfloat[vertex_indices.size() * 3];
+    GLfloat *vertex_normals = new GLfloat[vertex_indices.size() * 3];
+
+    nVertices = vertices.size() * 3;
+
+    for (int i = 0; i < vertices.size(); i++)
+    {
+        shape_vertices[i * 3] = vertices[i].pos.x;
+        shape_vertices[i * 3 + 1] = vertices[i].pos.y;
+        shape_vertices[i * 3 + 2] = vertices[i].pos.z;
+    }
+
+    // for (int i = 0; i < vertices.size(); i++)
+    // {
+    //     vertex_normals[i * 3] = vertices[i].n.x;
+    //     vertex_normals[i * 3 + 1] = vertices[i].n.y;
+    //     vertex_normals[i * 3 + 2] = vertices[i].n.z;
+    // }
+
+    // // Ordered vertex array to be passed to the shader to draw the mesh
+    // for (int i = 0; i < vertex_indices.size(); i++)
+    // {
+    //     int vertexIndex = vertex_indices[i];
+    //     shape_vertices[i * 3] = temp_vertices[vertexIndex - 1][0] * scale; // x-coordinate
+    //     shape_vertices[i * 3 + 1] = temp_vertices[vertexIndex - 1][1] * scale; // y-coordinate
+    //     shape_vertices[i * 3 + 2] = temp_vertices[vertexIndex - 1][2] * scale; // z-coordinate
+    // }
+
+    // generate normals for the triangle mesh
+    for (int i = 0; i < vertex_indices.size(); i += 3)
+    {
+        glm::vec3 v1 = glm::vec3(shape_vertices[(i + 1) * 3] - shape_vertices[i * 3], shape_vertices[(i + 1) * 3 + 1] - shape_vertices[i * 3 + 1], shape_vertices[(i + 1) * 3 + 2] - shape_vertices[i * 3 + 2]);
+        glm::vec3 v2 = glm::vec3(shape_vertices[(i + 2) * 3] - shape_vertices[(i + 1) * 3], shape_vertices[(i + 2) * 3 + 1] - shape_vertices[(i + 1) * 3 + 1], shape_vertices[(i + 2) * 3 + 2] - shape_vertices[(i + 1) * 3 + 2]);
+
+        // using the first two vectors of a triangle, we can calculate the normal
+        glm::vec3 n = cross(v1, v2);
+        n = normalize(n);
+
+
+        vertex_normals[i * 3] = n.x;
+        vertex_normals[(i + 1) * 3] = n.x;
+        vertex_normals[(i + 2) * 3] = n.x;
+        vertex_normals[i * 3 + 1] = n.y;
+        vertex_normals[(i + 1) * 3 + 1] = n.y;
+        vertex_normals[(i + 2) * 3 + 1] = n.y;
+        vertex_normals[i * 3 + 2] = n.z;
+        vertex_normals[(i + 1) * 3 + 2] = n.z;
+        vertex_normals[(i + 2) * 3 + 2] = n.z;
+    }
+
+    // for (int i = 0; i < vertex_indices.size(); i += 3)
+    // {
+
+    //     glm::vec3 a = glm::vec3(shape_vertices[i * 3], shape_vertices[i * 3 + 1], shape_vertices[i * 3 + 2]);
+    //     glm::vec3 b = glm::vec3(shape_vertices[(i + 1) * 3], shape_vertices[(i + 1) * 3 + 1], shape_vertices[(i + 1) * 3 + 2]);
+    //     glm::vec3 c = glm::vec3(shape_vertices[(i + 2) * 3], shape_vertices[(i + 2) * 3 + 1], shape_vertices[(i + 2) * 3 + 2]);
+    //     glm::vec3 n = glm::vec3(vertex_normals[i * 3], vertex_normals[i * 3 + 1], vertex_normals[i * 3 + 2]);
+
+    //     // std::cout << a.x << " " << a.y << " " << a.z << std::endl;
+    //     // std::cout << b.x << " " << b.y << " " << b.z << std::endl;
+    //     // std::cout << c.x << " " << c.y << " " << c.z << std::endl;
+    //     // std::cout << n.x << " " << n.y << " " << n.z << std::endl << std::endl;
+    // }
+
+    // Generate VAO object
+    glGenVertexArrays(1, &shape_VAO);
+    glBindVertexArray(shape_VAO);
+
+    // Create VBOs for the VAO
+    GLuint vertex_VBO; // Vertex Buffer
+    glGenBuffers(1, &vertex_VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, vertex_VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * vertices.size() * 3, shape_vertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(vVertex_attrib);
+    glVertexAttribPointer(vVertex_attrib, 3, GL_FLOAT, GL_FALSE, 00, 0);
+    delete[] shape_vertices;
+
+    GLuint normal_VBO; // Normal Buffer
+    glGenBuffers(1, &normal_VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, normal_VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * vertices.size() * 3, vertex_normals, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(vNormal_attrib);
+    glVertexAttribPointer(vNormal_attrib, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    delete[] vertex_normals;
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
